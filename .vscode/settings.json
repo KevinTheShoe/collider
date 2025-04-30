@@ -12,6 +12,9 @@
 		"cmath": "cpp",
 		"cstdlib": "cpp",
 		"algorithm": "cpp",
-		"*.m": "cpp"
+		"*.m": "cpp",
+		"array": "cpp",
+		"xstring": "cpp",
+		"utility": "cpp"
 	}
 }
