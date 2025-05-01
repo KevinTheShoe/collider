@@ -15,6 +15,9 @@
 		"*.m": "cpp",
 		"array": "cpp",
 		"xstring": "cpp",
-		"utility": "cpp"
+		"utility": "cpp",
+		"vector": "cpp",
+		"ostream": "cpp",
+		"xutility": "cpp"
 	}
 }
