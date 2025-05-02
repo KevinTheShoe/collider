@@ -95,7 +95,7 @@ vec3 clamp(vec3 v, double minVal, double maxVal) {return vec3(clamp(v.x, minVal,
 // Length of vector
 double length(vec2 v) {return sqrt(pow(v.x, 2) + pow(v.y, 2));}
 
-// === Bezier SDF ===
+// === Bezier SDF, credit Adam Simmons (https://www.shadertoy.com/view/ltXSDB) ===
 
 // Test if point p crosses line (a, b), returns sign of result
 double testCross(vec2 a, vec2 b, vec2 p) {
@@ -119,7 +119,7 @@ double signBezier(vec2 p, vec2 A, vec2 B, vec2 C) {
 	) * testCross(A, C, B);
 }
 
-// Solve cubic equation for roots
+// Solve cubic equation for roots (trigonometric solution for a depressed cubic)
 vec3 solveCubic(double a, double b, double c) {
 	double p = b - a*a / 3.0, p3 = p*p*p;
 	double q = a * (2.0*a*a - 9.0*b) / 27.0 + c;
@@ -141,8 +141,21 @@ double bezierSDF(vec2 p, bezier in) {
 	vec2 A = in.A;
 	vec2 B = in.B;
 	vec2 C = in.C;
-	B = mix(B + vec2(1e-4), B, step(1e-6, abs(B * 2.0 - A - C))); // correction for catastrophic cancellation
-	vec2 a = B - A, b = A - B * 2.0 + C, c = a * 2.0, d = A - p;
+
+	// if abs(B * 2.0 - A - C) less than 1e-6, add 1e-4 to B
+	B = mix(B + vec2(1e-4), B, step(1e-6, abs(B * 2.0 - A - C)));
+
+	// Minimize f(t) = |p - b(t)|^2 (v^2 = dot(v, v))
+	// => f(t) = |p|^2 - 2p \cdot b(t) + |b(t)|^2
+	// => To minimize, find where f'(t) = 0
+	// => Solve f'(t) = - 2p \cdot b'(t) + 2b(t) \cdot b'(t) = b'(t) \cdot 2 * (b(t) - p) = 0
+	// => (b(t) - p) \cdot b'(t) = 0
+	// (b(t) - p) \cdot b'(t) = 0
+	// => ((A - 2B + C)t^2 + (2B - 2A)t + A - p) \cdot (2(A - 2B + C)t + (2B - 2A)) = 0
+	vec2 a = B - A,
+	b = A - B * 2.0 + C,
+	c = a * 2.0,
+	d = A - p;
 	vec3 k = vec3(3.0*dot(a,b), 2.0*dot(a,a) + dot(d,b), dot(d,a)) / dot(b,b);
 	vec3 t = clamp(solveCubic(k.x, k.y, k.z), 0.0, 1.0);
 	vec2 pos = A + (c + b*t.x)*t.x;
@@ -152,6 +165,22 @@ double bezierSDF(vec2 p, bezier in) {
 	pos = A + (c + b*t.z)*t.z;
 	dis = min(dis, length(pos - p));
 	return dis * signBezier(p, A, B, C);
+}
+
+// Find closest point on bezier curve to point p
+vec2 bezierClosest(vec2 p, bezier in) {
+	vec2 A = in.A;
+	vec2 B = in.B;
+	vec2 C = in.C;
+	B = mix(B + vec2(1e-4), B, step(1e-6, abs(B * 2.0 - A - C)));
+	vec2 a = B - A,
+	b = A - B * 2.0 + C,
+	c = a * 2.0,
+	d = A - p;
+	vec3 k = vec3(3.0*dot(a,b), 2.0*dot(a,a) + dot(d,b), dot(d,a)) / dot(b,b);
+	vec3 t = clamp(solveCubic(k.x, k.y, k.z), 0.0, 1.0);
+	vec2 pos = A + (c + b*t.x)*t.x;
+	return pos;
 }
 
 vec2 findAnalyticIntersection(bezier b1, bezier b2, int method, int n, double estimate0, double estimate1, double estimate2) {
@@ -172,7 +201,7 @@ vec2 findAnalyticIntersection(bezier b1, bezier b2, int method, int n, double es
 	vec2 b = (b1.B - b1.A)*2.0;
 	vec2 c = b1.A;
 
-	if (n == 0) n = 100;
+	if (n == 0) n = 50;
 
 	switch (method) {
 		case 0: {
@@ -275,7 +304,7 @@ int main(void) {
 	// SetConfigFlags(FLAG_VSYNC_HINT | FLAG_WINDOW_HIGHDPI | FLAG_WINDOW_RESIZABLE);
 	SetConfigFlags(FLAG_WINDOW_HIGHDPI | FLAG_WINDOW_RESIZABLE);
 	InitWindow(1280, 720, "Collider");
-	SetTargetFPS(6000);
+	SetTargetFPS(60);
 
 	vector<vector<bezier>> shapes;
 	shapes.push_back({bezier(vec2(20, 20), vec2(GetScreenWidth() - 220, 20), vec2(GetScreenWidth() - 220, GetScreenHeight() - 20))});
@@ -283,7 +312,7 @@ int main(void) {
 
 	vec2* adjusting = nullptr;
 
-	int n = 3;
+	int n = 0;
 	double p[3] = {0.0, 0.5, 1.0};
 	int changing_p = 0;
 	int method = 0;
@@ -302,7 +331,7 @@ int main(void) {
 				DrawRectangle(b.A.x - ctrlpt_size/2, b.A.y - ctrlpt_size/2, ctrlpt_size, ctrlpt_size, ORANGE);
 				DrawRectangle(b.B.x - ctrlpt_size/2, b.B.y - ctrlpt_size/2, ctrlpt_size, ctrlpt_size, ORANGE);
 				DrawRectangle(b.C.x - ctrlpt_size/2, b.C.y - ctrlpt_size/2, ctrlpt_size, ctrlpt_size, ORANGE);
-				// Handle adjustment
+				// Identify control point adjustment
 				if (IsMouseButtonUp(MOUSE_BUTTON_LEFT)) adjusting = nullptr;
 				else if (adjusting == nullptr && abs(b.A.x - GetMousePosition().x) < 5 && abs(b.A.y - GetMousePosition().y) < 5) adjusting = &shapes[i][i2].A;
 				else if (adjusting == nullptr && abs(b.B.x - GetMousePosition().x) < 5 && abs(b.B.y - GetMousePosition().y) < 5) adjusting = &shapes[i][i2].B;
@@ -314,7 +343,6 @@ int main(void) {
 						// 	DrawCircle(p.x, p.y, 5, GREEN);
 						// }
 						vec2 pt = findAnalyticIntersection(b, b2, method, n, p[0], p[1], p[2]);
-						cout << pt.x << endl;
 						DrawCircle(pt.x, pt.y, 5, GREEN);
 					}
 				}
@@ -325,13 +353,19 @@ int main(void) {
 					Vector2{static_cast<float>(b.C.x), static_cast<float>(b.C.y)}
 				};
 				DrawSplineBezierQuadratic(points, 3, 1, RED);
+				// Draw line from mouse pos to closest point
+				vec2 closest_to_mouse = bezierClosest(vec2(GetMouseX(), GetMouseY()), b);
+				DrawLineV(Vector2{static_cast<float>(closest_to_mouse.x), static_cast<float>(closest_to_mouse.y)}, GetMousePosition(), LIGHTGRAY);
 			}
 		}
 
+		// Perform control point adjustment
 		if (adjusting != nullptr) {
 			adjusting->x = GetMousePosition().x;
 			adjusting->y = GetMousePosition().y;
 		}
+
+		// Keyboard controls
 		if (IsKeyPressed(KEY_ONE)) changing_p = 0;
 		if (IsKeyPressed(KEY_TWO)) changing_p = 1;
 		if (IsKeyPressed(KEY_THREE)) changing_p = 2;
@@ -369,20 +403,20 @@ int main(void) {
 		// n
 		DrawText(TextFormat("n: %i", n), GetScreenWidth() - 175, 235, 25, BLACK);
 		// p
-		DrawText(TextFormat("p0: %f", p[0]), GetScreenWidth() - 175, 285, 25, changing_p == 0 ? DARKGRAY : BLACK);
-		DrawText(TextFormat("p1: %f", p[1]), GetScreenWidth() - 175, 335, 25, changing_p == 1 ? DARKGRAY : BLACK);
-		DrawText(TextFormat("p2: %f", p[2]), GetScreenWidth() - 175, 385, 25, changing_p == 2 ? DARKGRAY : BLACK);
+		DrawText(TextFormat("p0: %f", p[0]), GetScreenWidth() - 175, 285, 25, changing_p == 0 ? GRAY : BLACK);
+		DrawText(TextFormat("p1: %f", p[1]), GetScreenWidth() - 175, 335, 25, changing_p == 1 ? GRAY : BLACK);
+		DrawText(TextFormat("p2: %f", p[2]), GetScreenWidth() - 175, 385, 25, changing_p == 2 ? GRAY : BLACK);
 		// Instructions
 		DrawText("1,2,3: select p", GetScreenWidth() - 190, GetScreenHeight() - 75, 20, BLACK);
 		DrawText("U/D: change n", GetScreenWidth() - 190, GetScreenHeight() - 50, 20, BLACK);
 		DrawText("L/R: change p", GetScreenWidth() - 190, GetScreenHeight() - 25, 20, BLACK);
 
-		DrawText(TextFormat("%f", bezierSDF(vec2(GetMousePosition().x, GetMousePosition().y), shapes[0][0])), 25, GetScreenHeight() - 75, 20, LIGHTGRAY);
+		DrawText(TextFormat("%f", bezierSDF(vec2(GetMousePosition().x, GetMousePosition().y), shapes[0][0])), 25, GetScreenHeight() - 75, 20, GRAY);
 		// DrawText(TextFormat("%f", bezierSDF(vec2(GetMousePosition().x, GetMousePosition().y), vec2(points1[0].x, points1[0].y), vec2(points1[1].x, points1[1].y), vec2(points1[2].x, points1[2].y))), 25, GetScreenHeight() - 75, 20, LIGHTGRAY);
 		// DrawText(TextFormat("%f %f", collision_point[0], collision_point[1]), 25, GetScreenHeight() - 50, 20, LIGHTGRAY);
 		// DrawText(TextFormat("%i", n), 25, GetScreenHeight() - 25, 20, LIGHTGRAY);
 
-		DrawFPS(GetScreenHeight() - 25, GetScreenHeight() - 25);
+		DrawFPS(25, GetScreenHeight() - 25);
 
 		EndDrawing();
 	}
