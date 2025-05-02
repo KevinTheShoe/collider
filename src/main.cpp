@@ -298,17 +298,43 @@ vector<vec2> findAllAnalyticIntersection(bezier b1, bezier b2, int method, int n
 	return results;
 }
 
+struct mcresult {
+	vec2 p;
+	int in;
+	mcresult(vec2 p_in, int in_in) : p(p_in), in(in_in) {}
+};
+vector<mcresult> montecarlo(vector<vector<bezier>> shapes, int x, int y, int width, int height, int n) {
+	vector<mcresult> output;
+	srand(time(0));
+	for (int i = 0; i < n; i++) {
+		vec2 rpoint = vec2(x + (rand() % (width - x)), y + (rand() % (height - y)));
+		int num_in = 0;
+		for (vector<bezier> shape : shapes) {
+			int in = 1;
+			for (bezier b : shape) {
+				if (bezierSDF(rpoint, b) > 0) {
+					in = 0;
+					break;
+				}
+			}
+			if (in) num_in++;
+		}
+		output.push_back(mcresult(rpoint, num_in));
+	}
+	return output;
+}
+
 int main(void) {
 	// Intitialize Window
 	SetConfigFlags(FLAG_MSAA_4X_HINT);
 	// SetConfigFlags(FLAG_VSYNC_HINT | FLAG_WINDOW_HIGHDPI | FLAG_WINDOW_RESIZABLE);
 	SetConfigFlags(FLAG_WINDOW_HIGHDPI | FLAG_WINDOW_RESIZABLE);
-	InitWindow(1280, 720, "Collider");
+	InitWindow(800, 600, "Collider");
 	SetTargetFPS(60);
 
 	vector<vector<bezier>> shapes;
 	shapes.push_back({bezier(vec2(20, 20), vec2(GetScreenWidth() - 220, 20), vec2(GetScreenWidth() - 220, GetScreenHeight() - 20))});
-	shapes.push_back({bezier(vec2(GetScreenWidth() - 220, 20), vec2(20, 20), vec2(20, GetScreenHeight() - 20))});
+	shapes.push_back({bezier(vec2(20, GetScreenHeight() - 40), vec2(20, 20), vec2(GetScreenWidth() - 220, 20))});
 
 	vec2* adjusting = nullptr;
 
@@ -316,6 +342,10 @@ int main(void) {
 	double p[3] = {0.0, 0.5, 1.0};
 	int changing_p = 0;
 	int method = 0;
+	int show_sdf = 0;
+
+	vector<mcresult> montecarlo_results;
+	int montecarlo_n = 2000;
 
 	const float ctrlpt_size = 10;
 
@@ -354,8 +384,10 @@ int main(void) {
 				};
 				DrawSplineBezierQuadratic(points, 3, 1, RED);
 				// Draw line from mouse pos to closest point
-				vec2 closest_to_mouse = bezierClosest(vec2(GetMouseX(), GetMouseY()), b);
-				DrawLineV(Vector2{static_cast<float>(closest_to_mouse.x), static_cast<float>(closest_to_mouse.y)}, GetMousePosition(), LIGHTGRAY);
+				if (show_sdf) {
+					vec2 closest_to_mouse = bezierClosest(vec2(GetMouseX(), GetMouseY()), b);
+					DrawLineV(Vector2{static_cast<float>(closest_to_mouse.x), static_cast<float>(closest_to_mouse.y)}, GetMousePosition(), LIGHTGRAY);
+				}
 			}
 		}
 
@@ -373,6 +405,7 @@ int main(void) {
 		if (IsKeyPressed(KEY_DOWN) && n > 0) n--;
 		if (IsKeyPressed(KEY_RIGHT) && p[changing_p] < 0.99) p[changing_p] += 0.1;
 		if (IsKeyPressed(KEY_LEFT) && p[changing_p] > 0.01) p[changing_p] -= 0.1;
+		if (IsKeyPressed(KEY_SPACE)) show_sdf = !show_sdf;
 
 		// === Handle UI ===
 		DrawRectangle(GetScreenWidth() - 200, 0, 200, GetScreenHeight(), LIGHTGRAY);
@@ -400,23 +433,43 @@ int main(void) {
 		if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(GetMousePosition(), muller_button)) {
 			method = 2;
 		}
+		// Monte Carlo button
+		Rectangle montecarlo_button = Rectangle{static_cast<float>(GetScreenWidth() - 175), 235, 150, 45};
+		if (montecarlo_results.size() != 0) DrawRectangleRec(montecarlo_button, DARKGRAY);
+		else DrawRectangleRec(montecarlo_button, GRAY);
+		DrawText("M. Carlo", GetScreenWidth() - 165, 245, 25, BLACK);
+		if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(GetMousePosition(), montecarlo_button)) {
+			if (montecarlo_results.size() == 0) montecarlo_results = montecarlo(shapes, 0, 0, GetScreenWidth() - 200, GetScreenHeight(), montecarlo_n);
+			else montecarlo_results.clear();
+		}
+		// Monte Carlo results
+		if (montecarlo_results.size() > 0) {
+			int two_or_more = 0;
+			for (mcresult r : montecarlo_results) {
+				if (r.in == 0) DrawCircleV(Vector2{static_cast<float>(r.p.x), static_cast<float>(r.p.y)}, 2, YELLOW);
+				else if (r.in == 1) DrawCircleV(Vector2{static_cast<float>(r.p.x), static_cast<float>(r.p.y)}, 2, PINK);
+				else if (r.in >= 2) {
+					DrawCircleV(Vector2{static_cast<float>(r.p.x), static_cast<float>(r.p.y)}, 2, BLUE);
+					two_or_more++;
+				}
+			}
+			DrawRectangle((GetScreenWidth() - 200) / 2 - 200, GetScreenHeight() - 30, 400, 45, LIGHTGRAY);
+			float area = ((float) two_or_more / (float) montecarlo_n) * ((GetScreenWidth() - 200) * GetScreenHeight());
+			DrawText(TextFormat("2+ shape overlap area: %i", (int) round(area)), (GetScreenWidth() - 200) / 2 - 190, GetScreenHeight() - 25, 20, DARKGRAY);
+		}
 		// n
-		DrawText(TextFormat("n: %i", n), GetScreenWidth() - 175, 235, 25, BLACK);
+		DrawText(TextFormat("n: %i", n), GetScreenWidth() - 175, 305, 25, BLACK);
 		// p
-		DrawText(TextFormat("p0: %f", p[0]), GetScreenWidth() - 175, 285, 25, changing_p == 0 ? GRAY : BLACK);
-		DrawText(TextFormat("p1: %f", p[1]), GetScreenWidth() - 175, 335, 25, changing_p == 1 ? GRAY : BLACK);
-		DrawText(TextFormat("p2: %f", p[2]), GetScreenWidth() - 175, 385, 25, changing_p == 2 ? GRAY : BLACK);
+		DrawText(TextFormat("p0: %f", p[0]), GetScreenWidth() - 175, 355, 25, changing_p == 0 ? GRAY : BLACK);
+		DrawText(TextFormat("p1: %f", p[1]), GetScreenWidth() - 175, 405, 25, changing_p == 1 ? GRAY : BLACK);
+		DrawText(TextFormat("p2: %f", p[2]), GetScreenWidth() - 175, 455, 25, changing_p == 2 ? GRAY : BLACK);
 		// Instructions
-		DrawText("1,2,3: select p", GetScreenWidth() - 190, GetScreenHeight() - 75, 20, BLACK);
-		DrawText("U/D: change n", GetScreenWidth() - 190, GetScreenHeight() - 50, 20, BLACK);
-		DrawText("L/R: change p", GetScreenWidth() - 190, GetScreenHeight() - 25, 20, BLACK);
+		DrawText("SPACE: SDF", GetScreenWidth() - 175, GetScreenHeight() - 100, 20, BLACK);
+		DrawText("1,2,3: select p", GetScreenWidth() - 175, GetScreenHeight() - 75, 20, BLACK);
+		DrawText("U/D: change n", GetScreenWidth() - 175, GetScreenHeight() - 50, 20, BLACK);
+		DrawText("L/R: change p", GetScreenWidth() - 175, GetScreenHeight() - 25, 20, BLACK);
 
-		DrawText(TextFormat("%f", bezierSDF(vec2(GetMousePosition().x, GetMousePosition().y), shapes[0][0])), 25, GetScreenHeight() - 75, 20, GRAY);
-		// DrawText(TextFormat("%f", bezierSDF(vec2(GetMousePosition().x, GetMousePosition().y), vec2(points1[0].x, points1[0].y), vec2(points1[1].x, points1[1].y), vec2(points1[2].x, points1[2].y))), 25, GetScreenHeight() - 75, 20, LIGHTGRAY);
-		// DrawText(TextFormat("%f %f", collision_point[0], collision_point[1]), 25, GetScreenHeight() - 50, 20, LIGHTGRAY);
-		// DrawText(TextFormat("%i", n), 25, GetScreenHeight() - 25, 20, LIGHTGRAY);
-
-		DrawFPS(25, GetScreenHeight() - 25);
+		// DrawFPS(10, GetScreenHeight() - 25);
 
 		EndDrawing();
 	}
